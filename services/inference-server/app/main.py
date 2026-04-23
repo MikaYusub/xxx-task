@@ -1,0 +1,266 @@
+from __future__ import annotations
+
+import base64
+import hashlib
+import os
+import uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import urlparse
+
+import requests
+from fastapi import FastAPI, Header, HTTPException
+from google.cloud import firestore
+from PIL import Image, ImageDraw
+from pydantic import BaseModel
+
+api_key = os.environ["API_KEY"]
+project_id = os.environ.get("GOOGLE_CLOUD_PROJECT", "demo-local")
+output_dir = Path(os.environ.get("OUTPUT_DIR", "outputs"))
+lora_cache_dir = Path(os.environ.get("LORA_CACHE_DIR", "cache/lora"))
+inference_mode = os.environ.get("INFERENCE_MODE", "fake")
+lease_seconds = int(os.environ.get("LEASE_SECONDS", "1800"))
+processing_owner = os.environ.get("PROCESSING_OWNER", f"inference-{uuid.uuid4()}")
+
+output_dir.mkdir(parents=True, exist_ok=True)
+lora_cache_dir.mkdir(parents=True, exist_ok=True)
+
+db = firestore.Client(project=project_id)
+app = FastAPI(title="Codeway Inference Server")
+
+
+class GenerateRequest(BaseModel):
+    doc_id: str
+    prompt: str
+    lora_url: str | None = None
+    lora_weight: float | None = None
+
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True, "mode": inference_mode}
+
+
+@app.post("/generate")
+def generate(request: GenerateRequest, authorization: str = Header("")):
+    require_auth(authorization)
+    validate_request(request)
+
+    claim = claim_job(request.doc_id)
+
+    if claim == "done":
+        return {"image": encode_output(request.doc_id)}
+
+    if claim == "in_progress":
+        raise HTTPException(status_code=409, detail="Job is already processing")
+
+    try:
+        image_path = output_path(request.doc_id)
+        tmp_path = image_path.with_suffix(".tmp.png")
+
+        if inference_mode == "fake":
+            write_fake_image(request, tmp_path)
+        elif inference_mode == "real":
+            write_real_image(request, tmp_path)
+        else:
+            raise RuntimeError(f"Unknown INFERENCE_MODE={inference_mode}")
+
+        os.replace(tmp_path, image_path)
+        complete_job(request.doc_id, str(image_path))
+
+        return {"image": encode_output(request.doc_id)}
+    except Exception as error:
+        fail_job(request.doc_id, "GENERATION_FAILED", str(error))
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+def require_auth(authorization: str):
+    if authorization != f"Bearer {api_key}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def validate_request(request: GenerateRequest):
+    if not request.doc_id:
+        raise HTTPException(status_code=422, detail="doc_id is required")
+
+    if not request.prompt or len(request.prompt) > 1000:
+        raise HTTPException(status_code=422, detail="prompt must be 1-1000 characters")
+
+    if request.lora_url is None:
+        return
+
+    parsed = urlparse(request.lora_url)
+
+    if parsed.hostname != "huggingface.co":
+        raise HTTPException(status_code=422, detail="lora_url host is not trusted")
+
+    if request.lora_weight is None or request.lora_weight < 0 or request.lora_weight > 1:
+        raise HTTPException(status_code=422, detail="lora_weight must be 0.0-1.0")
+
+
+def claim_job(doc_id: str):
+    doc_ref = db.collection("generation_requests").document(doc_id)
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def claim(transaction):
+        snapshot = doc_ref.get(transaction=transaction)
+        data = snapshot.to_dict()
+
+        if data is None:
+            raise HTTPException(status_code=404, detail="Job document not found")
+
+        if data["status"] == "DONE" and output_path(doc_id).exists():
+            return "done"
+
+        if data["status"] == "PROCESSING" and lease_is_valid(data.get("lease_expires_at")):
+            return "in_progress"
+
+        if data["status"] not in ["QUEUED", "PROCESSING"]:
+            raise HTTPException(status_code=409, detail=f"Job is {data['status']}")
+
+        attempt_count = int(data.get("attempt_count", 0)) + 1
+        transaction.update(
+            doc_ref,
+            {
+                "status": "PROCESSING",
+                "processing_owner": processing_owner,
+                "lease_expires_at": datetime.now(timezone.utc)
+                + timedelta(seconds=lease_seconds),
+                "started_at": firestore.SERVER_TIMESTAMP,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "attempt_count": attempt_count,
+            },
+        )
+        return "claimed"
+
+    return claim(transaction)
+
+
+def complete_job(doc_id: str, path: str):
+    doc_ref = db.collection("generation_requests").document(doc_id)
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def complete(transaction):
+        snapshot = doc_ref.get(transaction=transaction)
+        data = snapshot.to_dict()
+
+        if data is None:
+            raise RuntimeError("Job document not found")
+
+        if data["status"] == "DONE":
+            return
+
+        if data["processing_owner"] != processing_owner:
+            raise RuntimeError("Processing lease was lost")
+
+        transaction.update(
+            doc_ref,
+            {
+                "status": "DONE",
+                "output_path": path,
+                "finished_at": firestore.SERVER_TIMESTAMP,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+        )
+
+    complete(transaction)
+
+
+def fail_job(doc_id: str, error_code: str, error_message: str):
+    doc_ref = db.collection("generation_requests").document(doc_id)
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def fail(transaction):
+        snapshot = doc_ref.get(transaction=transaction)
+        data = snapshot.to_dict()
+
+        if data is None or data["status"] == "DONE":
+            return
+
+        transaction.update(
+            doc_ref,
+            {
+                "status": "FAILED",
+                "error_code": error_code,
+                "error_message": error_message[:1000],
+                "finished_at": firestore.SERVER_TIMESTAMP,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+        )
+
+    fail(transaction)
+
+
+def lease_is_valid(value):
+    return isinstance(value, datetime) and value > datetime.now(timezone.utc)
+
+
+def output_path(doc_id: str):
+    return output_dir / f"{doc_id}.png"
+
+
+def encode_output(doc_id: str):
+    return base64.b64encode(output_path(doc_id).read_bytes()).decode("ascii")
+
+
+def write_fake_image(request: GenerateRequest, path: Path):
+    digest = hashlib.sha256(request.doc_id.encode("utf-8")).digest()
+    color = (digest[0], digest[1], digest[2])
+    image = Image.new("RGB", (512, 512), color)
+    draw = ImageDraw.Draw(image)
+    draw.text((24, 24), request.prompt[:80], fill=(255, 255, 255))
+    image.save(path, format="PNG")
+
+
+def write_real_image(request: GenerateRequest, path: Path):
+    from diffusers import DiffusionPipeline, LCMScheduler
+
+    pipe = get_pipe(DiffusionPipeline, LCMScheduler)
+
+    if request.lora_url:
+        lora_path = download_lora(request.lora_url)
+        pipe.load_lora_weights(str(lora_path))
+        if hasattr(pipe, "set_adapters"):
+            pipe.set_adapters(["default"], adapter_weights=[request.lora_weight])
+
+    image = pipe(
+        request.prompt,
+        num_inference_steps=4,
+        guidance_scale=8.0,
+    ).images[0]
+    image.save(path, format="PNG")
+
+
+pipe_cache = None
+
+
+def get_pipe(diffusion_pipeline, lcm_scheduler):
+    global pipe_cache
+
+    if pipe_cache is None:
+        pipe = diffusion_pipeline.from_pretrained("SimianLuo/LCM_Dreamshaper_v7")
+        pipe.scheduler = lcm_scheduler.from_config(pipe.scheduler.config)
+        pipe_cache = pipe
+
+    return pipe_cache
+
+
+def download_lora(url: str):
+    parsed = urlparse(url)
+
+    if parsed.hostname != "huggingface.co":
+        raise RuntimeError("LoRA host is not trusted")
+
+    filename = hashlib.sha256(url.encode("utf-8")).hexdigest() + ".safetensors"
+    path = lora_cache_dir / filename
+
+    if path.exists():
+        return path
+
+    response = requests.get(url, timeout=60)
+    response.raise_for_status()
+    path.write_bytes(response.content)
+    return path
