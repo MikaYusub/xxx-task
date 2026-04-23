@@ -1,0 +1,164 @@
+# Codeway Barcelona Backend Case
+
+Local backend platform for AI image generation requests.
+
+This repository contains the four required case components:
+
+- Publisher Client: anonymous Firebase Auth + Firestore write.
+- Cloud Function: Firebase Functions v2 trigger on `generation_requests/{document_id}`.
+- Inference Server: Python + FastAPI image generation API.
+- Config Service: TypeScript REST API for per-user LoRA config.
+
+Firestore is the source of truth for request state. Local generated images are saved to
+`outputs/{doc_id}.png`.
+
+## Quick Start
+
+1. Copy the example environment file:
+
+```bash
+cp .env.example .env
+```
+
+2. Start local services:
+
+```bash
+docker compose up --build
+```
+
+3. In another shell, create a request. With local Node 20:
+
+```bash
+npm install
+npm run publisher -- "a forest cabin in winter, oil painting style"
+```
+
+Or without relying on host Node:
+
+```bash
+docker compose run --rm publisher sh -c "npm install && npm run publisher -- 'a forest cabin in winter, oil painting style'"
+```
+
+To exercise the LoRA path, seed the anonymous UID before the Publisher writes the request:
+
+```bash
+npm run publisher -- --seed-config "a forest cabin in winter, oil painting style"
+```
+
+The Publisher prints the anonymous user id and Firestore document id. Use the Firebase
+Emulator UI at `http://127.0.0.1:4000` to inspect request status.
+
+## Local Ports
+
+- Firebase Emulator UI: `http://127.0.0.1:4000`
+- Firestore emulator: `127.0.0.1:8080`
+- Auth emulator: `127.0.0.1:9099`
+- Functions emulator: `127.0.0.1:5001`
+- Config Service: `http://127.0.0.1:3000`
+- Inference Server: `http://127.0.0.1:8000`
+
+## Environment
+
+Required values are shown in `.env.example`.
+
+`INFERENCE_MODE=fake` is the default local/test mode. It produces deterministic PNGs quickly.
+Use `INFERENCE_MODE=real` to run Diffusers with `SimianLuo/LCM_Dreamshaper_v7`; install
+`services/inference-server/requirements-real.txt` first.
+
+## Publisher Client
+
+The Publisher uses anonymous Firebase Auth and writes exactly this client-owned shape:
+
+```json
+{
+  "user_id": "uid-of-authenticated-user",
+  "prompt": "a forest cabin in winter, oil painting style",
+  "status": "CREATED"
+}
+```
+
+Run:
+
+```bash
+npm run publisher -- "an astronaut riding a horse, oil painting"
+```
+
+Add `--seed-config` before the prompt to make the local Config Service return a LoRA for that
+anonymous user.
+
+## Config Service API
+
+### Get user config
+
+```http
+GET /v1/config/{user_id}
+```
+
+`200`:
+
+```json
+{
+  "lora_url": "https://huggingface.co/vislupus/SD1.5-LoRA-Your-Name-Style/resolve/main/yn_style_v1-000039.safetensors",
+  "lora_weight": 0.8,
+  "updated_at": "2026-02-03T10:00:00Z"
+}
+```
+
+`404` means the user has no config and generation continues without LoRA.
+
+### Local seed helper
+
+```http
+POST /v1/local/users/{user_id}
+```
+
+Adds an anonymous local test user to the Config allowlist.
+
+## Inference API
+
+### Generate
+
+```http
+POST /generate
+Authorization: Bearer your-secret-key-here
+Content-Type: application/json
+```
+
+```json
+{
+  "doc_id": "firestore-document-id",
+  "prompt": "a forest cabin in winter, oil painting style",
+  "lora_url": "https://example.com/lora.safetensors",
+  "lora_weight": 0.8
+}
+```
+
+`200`:
+
+```json
+{
+  "image": "<base64-encoded-PNG>"
+}
+```
+
+## Checks
+
+Use Node 20 or the Docker workflow for JavaScript checks.
+
+```bash
+npm run build
+npm test
+```
+
+Python checks:
+
+```bash
+cd services/inference-server
+python -m pip install -r requirements.txt
+python -m pytest
+```
+
+## Documentation
+
+- `README.md`: local setup and API documentation.
+- `DESIGN.md`: architecture, trade-offs, scaling, retries, stuck-job recovery, and production deployment notes.
