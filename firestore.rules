@@ -1,0 +1,20 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /generation_requests/{docId} {
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['user_id', 'prompt', 'status'])
+        && request.resource.data.user_id == request.auth.uid
+        && request.resource.data.prompt is string
+        && request.resource.data.prompt.size() > 0
+        && request.resource.data.prompt.size() <= 1000
+        && request.resource.data.status == 'CREATED';
+
+      allow read: if request.auth != null
+        && resource.data.user_id == request.auth.uid;
+
+      allow update, delete: if false;
+    }
+  }
+}
