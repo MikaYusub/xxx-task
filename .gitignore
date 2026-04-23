@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+outputs/
+cache/
+*.log

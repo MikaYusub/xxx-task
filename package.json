@@ -1,0 +1,22 @@
+{
+  "name": "codeway-backend-case",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "services/config-service",
+    "services/functions",
+    "services/publisher"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm test --workspaces --if-present",
+    "publisher": "npm --workspace services/publisher run start",
+    "config": "npm --workspace services/config-service run dev"
+  },
+  "devDependencies": {
+    "firebase-tools": "^15.15.0",
+    "typescript": "^6.0.3"
+  }
+}
