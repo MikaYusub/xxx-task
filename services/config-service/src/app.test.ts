@@ -20,4 +20,14 @@ describe("config service", () => {
     expect(response.body.lora_weight).toBeLessThanOrEqual(1);
     expect(response.body.updated_at).toBe("2026-02-03T10:00:00Z");
   });
+
+  it("keeps the assigned LoRA stable for the same user", async () => {
+    const app = createApp();
+
+    await request(app).post("/v1/local/users/user-1").expect(201);
+    const first = await request(app).get("/v1/config/user-1").expect(200);
+    const second = await request(app).get("/v1/config/user-1").expect(200);
+
+    expect(second.body).toEqual(first.body);
+  });
 });

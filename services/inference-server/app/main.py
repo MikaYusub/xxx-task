@@ -4,15 +4,16 @@ import base64
 import hashlib
 import os
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import Body, FastAPI, Header, HTTPException
 from google.cloud import firestore
 from PIL import Image, ImageDraw
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 api_key = os.environ["API_KEY"]
 project_id = os.environ.get("GOOGLE_CLOUD_PROJECT", "demo-local")
@@ -26,14 +27,36 @@ output_dir.mkdir(parents=True, exist_ok=True)
 lora_cache_dir.mkdir(parents=True, exist_ok=True)
 
 db = firestore.Client(project=project_id)
-app = FastAPI(title="Codeway Inference Server")
 
 
-class GenerateRequest(BaseModel):
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    if inference_mode == "real":
+        from diffusers import DiffusionPipeline, LCMScheduler
+
+        get_pipe(DiffusionPipeline, LCMScheduler)
+
+    yield
+
+
+app = FastAPI(title="Codeway Inference Server", lifespan=lifespan)
+
+
+class NoLoraGenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     doc_id: str
     prompt: str
-    lora_url: str | None = None
-    lora_weight: float | None = None
+
+
+class LoraGenerateRequest(BaseModel):
+    doc_id: str
+    prompt: str
+    lora_url: str
+    lora_weight: float
+
+
+GenerateRequest = NoLoraGenerateRequest | LoraGenerateRequest
 
 
 @app.get("/healthz")
@@ -42,7 +65,7 @@ def healthz():
 
 
 @app.post("/generate")
-def generate(request: GenerateRequest, authorization: str = Header("")):
+def generate(request: GenerateRequest = Body(), authorization: str = Header("")):
     require_auth(authorization)
     validate_request(request)
 
@@ -86,7 +109,7 @@ def validate_request(request: GenerateRequest):
     if not request.prompt or len(request.prompt) > 1000:
         raise HTTPException(status_code=422, detail="prompt must be 1-1000 characters")
 
-    if request.lora_url is None:
+    if not has_lora(request):
         return
 
     parsed = urlparse(request.lora_url)
@@ -94,8 +117,12 @@ def validate_request(request: GenerateRequest):
     if parsed.hostname != "huggingface.co":
         raise HTTPException(status_code=422, detail="lora_url host is not trusted")
 
-    if request.lora_weight is None or request.lora_weight < 0 or request.lora_weight > 1:
+    if request.lora_weight < 0 or request.lora_weight > 1:
         raise HTTPException(status_code=422, detail="lora_weight must be 0.0-1.0")
+
+
+def has_lora(request: GenerateRequest):
+    return isinstance(request, LoraGenerateRequest)
 
 
 def claim_job(doc_id: str):
@@ -180,6 +207,9 @@ def fail_job(doc_id: str, error_code: str, error_message: str):
         if data is None or data["status"] == "DONE":
             return
 
+        if not can_fail_job(data):
+            return
+
         transaction.update(
             doc_ref,
             {
@@ -192,6 +222,10 @@ def fail_job(doc_id: str, error_code: str, error_message: str):
         )
 
     fail(transaction)
+
+
+def can_fail_job(data):
+    return data["status"] == "PROCESSING" and data["processing_owner"] == processing_owner
 
 
 def lease_is_valid(value):
@@ -219,19 +253,28 @@ def write_real_image(request: GenerateRequest, path: Path):
     from diffusers import DiffusionPipeline, LCMScheduler
 
     pipe = get_pipe(DiffusionPipeline, LCMScheduler)
+    unload_lora(pipe)
 
-    if request.lora_url:
-        lora_path = download_lora(request.lora_url)
-        pipe.load_lora_weights(str(lora_path))
-        if hasattr(pipe, "set_adapters"):
-            pipe.set_adapters(["default"], adapter_weights=[request.lora_weight])
+    try:
+        if has_lora(request):
+            lora_path = download_lora(request.lora_url)
+            pipe.load_lora_weights(str(lora_path))
+            if hasattr(pipe, "set_adapters"):
+                pipe.set_adapters(["default"], adapter_weights=[request.lora_weight])
 
-    image = pipe(
-        request.prompt,
-        num_inference_steps=4,
-        guidance_scale=8.0,
-    ).images[0]
-    image.save(path, format="PNG")
+        image = pipe(
+            request.prompt,
+            num_inference_steps=4,
+            guidance_scale=8.0,
+        ).images[0]
+        image.save(path, format="PNG")
+    finally:
+        unload_lora(pipe)
+
+
+def unload_lora(pipe):
+    if hasattr(pipe, "unload_lora_weights"):
+        pipe.unload_lora_weights()
 
 
 pipe_cache = None

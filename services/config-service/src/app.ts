@@ -1,14 +1,14 @@
 import express from "express";
 import { loraConfigs } from "./configs.js";
 
-const seededUsers = new Set(
-  (process.env.CONFIG_USER_ALLOWLIST ?? "")
-    .split(",")
-    .map((userId) => userId.trim())
-    .filter(Boolean),
-);
-
 export function createApp() {
+  const seededUsers = new Set(
+    (process.env.CONFIG_USER_ALLOWLIST ?? "")
+      .split(",")
+      .map((userId) => userId.trim())
+      .filter(Boolean),
+  );
+  const assignedConfigs = new Map<string, (typeof loraConfigs)[number]>();
   const app = express();
   app.use(express.json());
 
@@ -18,6 +18,7 @@ export function createApp() {
 
   app.post("/v1/local/users/:user_id", (request, response) => {
     seededUsers.add(request.params.user_id);
+    assignedConfigs.set(request.params.user_id, randomConfig());
     response.status(201).json({ user_id: request.params.user_id });
   });
 
@@ -27,9 +28,17 @@ export function createApp() {
       return;
     }
 
-    const index = Math.floor(Math.random() * loraConfigs.length);
-    response.json(loraConfigs[index]);
+    if (!assignedConfigs.has(request.params.user_id)) {
+      assignedConfigs.set(request.params.user_id, randomConfig());
+    }
+
+    response.json(assignedConfigs.get(request.params.user_id));
   });
 
   return app;
+}
+
+function randomConfig() {
+  const index = Math.floor(Math.random() * loraConfigs.length);
+  return loraConfigs[index];
 }
