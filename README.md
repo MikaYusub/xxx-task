@@ -26,27 +26,36 @@ cp .env.example .env
 docker compose up --build
 ```
 
-3. In another shell, create a request. With local Node 20:
+The first startup downloads the Diffusers model into `cache/huggingface` and can take several
+minutes on CPU. Wait until the inference server reports startup complete before submitting a prompt.
+
+3. In another shell, create a request:
 
 ```bash
 npm install
-npm run publisher -- "a forest cabin in winter, oil painting style"
+npm run demo -- "a forest cabin in winter, oil painting style"
 ```
 
-Or without relying on host Node:
+The demo command runs the Publisher inside Docker, signs in anonymously, writes the Firestore
+request, and prints the anonymous user id plus Firestore document id.
 
-```bash
-docker compose run --rm publisher sh -c "npm install && npm run publisher -- 'a forest cabin in winter, oil painting style'"
-```
-
-To exercise the LoRA path, seed the anonymous UID before the Publisher writes the request:
+To exercise the LoRA path with local Node 20, seed the anonymous UID before the Publisher writes
+the request:
 
 ```bash
 npm run publisher -- --seed-config "a forest cabin in winter, oil painting style"
 ```
 
 The Publisher prints the anonymous user id and Firestore document id. Use the Firebase
-Emulator UI at `http://127.0.0.1:4000` to inspect request status.
+Emulator UI at `http://127.0.0.1:4000/firestore` to inspect request status. Generated PNGs are
+written to `outputs/{doc_id}.png`.
+
+## Model
+
+The default Docker path installs `services/inference-server/requirements-real.txt`, including the
+CPU PyTorch wheel, and runs
+`SimianLuo/LCM_Dreamshaper_v7` with `LCMScheduler`, `steps=4`, and `guidance_scale=8.0`.
+The model cache is persisted at `cache/huggingface`.
 
 ## Local Ports
 
@@ -54,6 +63,7 @@ Emulator UI at `http://127.0.0.1:4000` to inspect request status.
 - Firestore emulator: `127.0.0.1:8080`
 - Auth emulator: `127.0.0.1:9099`
 - Functions emulator: `127.0.0.1:5001`
+- Pub/Sub emulator: `127.0.0.1:8085`
 - Config Service: `http://127.0.0.1:3000`
 - Inference Server: `http://127.0.0.1:8000`
 
@@ -61,9 +71,8 @@ Emulator UI at `http://127.0.0.1:4000` to inspect request status.
 
 Required values are shown in `.env.example`.
 
-`INFERENCE_MODE=fake` is the default local/test mode. It produces deterministic PNGs quickly.
-Use `INFERENCE_MODE=real` to run Diffusers with `SimianLuo/LCM_Dreamshaper_v7`; install
-`services/inference-server/requirements-real.txt` first.
+`INFERENCE_MODE=real` is the Docker default. Tests set `INFERENCE_MODE=fake` themselves so they stay
+fast and deterministic.
 
 ## Publisher Client
 
@@ -81,6 +90,12 @@ Run:
 
 ```bash
 npm run publisher -- "an astronaut riding a horse, oil painting"
+```
+
+Docker-only demo:
+
+```bash
+npm run demo -- "an astronaut riding a horse, oil painting"
 ```
 
 Add `--seed-config` before the prompt to make the local Config Service return a LoRA for that
@@ -128,10 +143,13 @@ Content-Type: application/json
 {
   "doc_id": "firestore-document-id",
   "prompt": "a forest cabin in winter, oil painting style",
-  "lora_url": "https://example.com/lora.safetensors",
+  "lora_url": "https://huggingface.co/org/model/resolve/main/adapter.safetensors",
   "lora_weight": 0.8
 }
 ```
+
+Omit both `lora_url` and `lora_weight` for no-LoRA generation. Supplying only one LoRA field is
+rejected.
 
 `200`:
 
@@ -150,13 +168,19 @@ npm run build
 npm test
 ```
 
-Python checks:
+`npm test` runs workspace tests and Firestore security-rules tests through the Firestore emulator.
+
+Python checks use Python 3.11, matching the inference Docker image:
 
 ```bash
 cd services/inference-server
-python -m pip install -r requirements.txt
-python -m pytest
+py -3.11 -m pip install -r requirements.txt
+py -3.11 -m pytest
 ```
+
+The Python suite includes an emulator-backed test for `QUEUED -> PROCESSING -> DONE`, output file
+creation, and duplicate `/generate` returning the existing result. Start the Firestore emulator first
+to exercise that path; otherwise run the full Docker stack.
 
 ## Documentation
 

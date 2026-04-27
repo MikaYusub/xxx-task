@@ -63,3 +63,5 @@ console.log(
     2,
   ),
 );
+
+process.exit(0);

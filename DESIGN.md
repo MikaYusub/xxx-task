@@ -12,6 +12,12 @@ The local case implementation has four services:
 Firestore is the canonical job-state store. The local filesystem only stores image artifacts at
 `outputs/{doc_id}.png`.
 
+The default Docker run installs Diffusers with the CPU PyTorch wheel and runs the required
+`SimianLuo/LCM_Dreamshaper_v7` model with `LCMScheduler`, `steps=4`, and `guidance_scale=8.0`.
+The inference server preloads the pipeline on startup and persists the Hugging Face cache on disk so
+the first request does not spend the Cloud Function timeout budget downloading weights. Tests force
+fake deterministic PNGs.
+
 ## State and Idempotency
 
 Valid status flow:
@@ -29,6 +35,9 @@ Duplicate `/generate` behavior:
 - expired `PROCESSING` may be reclaimed in a transaction.
 - `FAILED` is not restarted unless recovery explicitly requeues it.
 
+The inference request is one of two shapes: no LoRA fields, or both `lora_url` and `lora_weight`.
+Half-LoRA requests are rejected before job claiming.
+
 ## Failure Handling
 
 Config lookup distinguishes permanent absence from temporary failure:
@@ -38,6 +47,8 @@ Config lookup distinguishes permanent absence from temporary failure:
 
 Inference failures update Firestore to `FAILED` with `error_code` and `error_message`.
 If the process crashes mid-generation, the lease expires and scheduled recovery can reclaim it.
+The local Docker stack runs the Pub/Sub emulator so the scheduled Firebase Functions v2 recovery
+job is active during emulator demos.
 
 ## Scaling Answers
 
@@ -78,6 +89,13 @@ generation documents. The inference API requires `Authorization: Bearer <API_KEY
 stores secrets in Secret Manager and uses least-privilege service accounts.
 
 LoRA URLs are restricted to trusted hosts. Prompt and `lora_weight` are validated before processing.
+Security rules are covered by emulator tests for valid create, missing prompt, wrong user, invalid
+initial status, update, and delete.
+
+Cloud Function orchestration has focused tests for queueing, config `404`, config `5xx`, inference
+`500`, unreachable inference, duplicate create delivery, stale requeue, and max-attempt failure.
+Inference has an emulator-backed test for `QUEUED -> PROCESSING -> DONE`, local output creation, and
+duplicate `/generate` idempotency.
 
 ## Deployment
 

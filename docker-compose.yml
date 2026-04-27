@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: docker/firebase/Dockerfile
-    command: sh -c "npm install && npm run build --workspaces --if-present && npx firebase emulators:start --project demo-local --only auth,firestore,functions"
+    command: sh -c "npm install && npm run build --workspaces --if-present && npx firebase emulators:start --project demo-local --only auth,firestore,functions,pubsub"
     depends_on:
       - config-service
       - inference-server
@@ -16,6 +16,7 @@ services:
       - "4000:4000"
       - "5001:5001"
       - "8080:8080"
+      - "8085:8085"
       - "9099:9099"
     volumes:
       - .:/workspace
@@ -38,6 +39,7 @@ services:
     environment:
       FIRESTORE_EMULATOR_HOST: firebase:8080
       GOOGLE_CLOUD_PROJECT: demo-local
+      INFERENCE_MODE: real
       OUTPUT_DIR: /app/outputs
       LORA_CACHE_DIR: /app/cache/lora
     ports:
@@ -45,6 +47,7 @@ services:
     volumes:
       - ./outputs:/app/outputs
       - ./cache:/app/cache
+      - ./cache/huggingface:/root/.cache/huggingface
 
   publisher:
     image: node:20-bookworm

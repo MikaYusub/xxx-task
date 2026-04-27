@@ -1,8 +1,8 @@
 FROM python:3.11-slim
 
 WORKDIR /app
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-real.txt ./
+RUN pip install --no-cache-dir --timeout 120 --retries 5 -r requirements-real.txt
 COPY app ./app
 
 EXPOSE 8000
