@@ -11,12 +11,17 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "test": "npm test --workspaces --if-present",
+    "test": "npm run test:workspaces && npm run test:rules",
+    "test:workspaces": "npm test --workspaces --if-present",
+    "test:rules": "firebase emulators:exec --project demo-local --only firestore \"vitest run firestore.rules.test.ts\"",
+    "demo": "node scripts/demo.mjs",
     "publisher": "npm --workspace services/publisher run start",
     "config": "npm --workspace services/config-service run dev"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.0",
     "firebase-tools": "^15.15.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^2.1.9"
   }
 }

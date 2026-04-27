@@ -77,7 +77,7 @@ export const recoverStuckGenerationRequests = onSchedule("every 5 minutes", asyn
   }
 });
 
-async function queueCreatedRequest(docId: string) {
+export async function queueCreatedRequest(docId: string) {
   const ref = db.collection("generation_requests").doc(docId);
 
   return db.runTransaction(async (transaction) => {
@@ -99,7 +99,7 @@ async function queueCreatedRequest(docId: string) {
   });
 }
 
-async function dispatchQueuedRequest(docId: string, userId: string, prompt: string) {
+export async function dispatchQueuedRequest(docId: string, userId: string, prompt: string) {
   const configResult = await getUserConfig(userId);
 
   if (configResult.type === "temporary_failure") {
@@ -264,7 +264,7 @@ function failurePatch(errorCode: string, message: string) {
   };
 }
 
-async function recoverStaleJob(docId: string) {
+export async function recoverStaleJob(docId: string) {
   const ref = db.collection("generation_requests").doc(docId);
 
   return db.runTransaction(async (transaction) => {
@@ -318,4 +318,8 @@ function requiredEnv(name: string) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+export function clearConfigCache() {
+  configCache.clear();
 }
