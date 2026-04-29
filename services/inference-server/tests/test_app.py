@@ -125,6 +125,24 @@ def test_rejects_unknown_generate_fields(tmp_path, monkeypatch):
     assert response.status_code == 422
 
 
+def test_local_mode_switches_to_fake(tmp_path, monkeypatch):
+    test_client, _completed, _failed = make_client(tmp_path, monkeypatch)
+
+    response = test_client.post("/v1/local/mode", json={"mode": "fake"})
+
+    assert response.status_code == 200
+    assert response.json() == {"mode": "fake"}
+    assert test_client.get("/v1/local/mode").json() == {"mode": "fake"}
+
+
+def test_local_mode_rejects_unknown_mode(tmp_path, monkeypatch):
+    test_client, _completed, _failed = make_client(tmp_path, monkeypatch)
+
+    response = test_client.post("/v1/local/mode", json={"mode": "turbo"})
+
+    assert response.status_code == 422
+
+
 def test_stale_worker_cannot_fail_reclaimed_job():
     assert main.can_fail_job({"status": "PROCESSING", "processing_owner": main.processing_owner})
     assert not main.can_fail_job({"status": "PROCESSING", "processing_owner": "new-owner"})

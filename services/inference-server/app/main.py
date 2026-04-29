@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 import requests
 from fastapi import Body, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from google.cloud import firestore
 from PIL import Image, ImageDraw
 from pydantic import BaseModel, ConfigDict
@@ -20,6 +21,7 @@ project_id = os.environ.get("GOOGLE_CLOUD_PROJECT", "demo-local")
 output_dir = Path(os.environ.get("OUTPUT_DIR", "outputs"))
 lora_cache_dir = Path(os.environ.get("LORA_CACHE_DIR", "cache/lora"))
 inference_mode = os.environ.get("INFERENCE_MODE", "fake")
+runtime_mode = inference_mode
 lease_seconds = int(os.environ.get("LEASE_SECONDS", "1800"))
 processing_owner = os.environ.get("PROCESSING_OWNER", f"inference-{uuid.uuid4()}")
 
@@ -40,6 +42,12 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Codeway Inference Server", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://127.0.0.1:4173"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
 
 
 class NoLoraGenerateRequest(BaseModel):
@@ -58,12 +66,39 @@ class LoraGenerateRequest(BaseModel):
     lora_weight: float
 
 
+class ModeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: str
+
+
 GenerateRequest = NoLoraGenerateRequest | LoraGenerateRequest
 
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True, "mode": inference_mode}
+    return {"ok": True, "mode": runtime_mode}
+
+
+@app.get("/v1/local/mode")
+def get_mode():
+    return {"mode": runtime_mode}
+
+
+@app.post("/v1/local/mode")
+def set_mode(request: ModeRequest):
+    global runtime_mode
+
+    if request.mode not in ["fake", "real"]:
+        raise HTTPException(status_code=422, detail="mode must be fake or real")
+
+    if request.mode == "real":
+        from diffusers import DiffusionPipeline, LCMScheduler
+
+        get_pipe(DiffusionPipeline, LCMScheduler)
+
+    runtime_mode = request.mode
+    return {"mode": runtime_mode}
 
 
 @app.post("/generate")
@@ -83,12 +118,12 @@ def generate(request: GenerateRequest = Body(), authorization: str = Header(""))
         image_path = output_path(request.doc_id)
         tmp_path = image_path.with_suffix(".tmp.png")
 
-        if inference_mode == "fake":
+        if runtime_mode == "fake":
             write_fake_image(request, tmp_path)
-        elif inference_mode == "real":
+        elif runtime_mode == "real":
             write_real_image(request, tmp_path)
         else:
-            raise RuntimeError(f"Unknown INFERENCE_MODE={inference_mode}")
+            raise RuntimeError(f"Unknown inference mode={runtime_mode}")
 
         os.replace(tmp_path, image_path)
         complete_job(request.doc_id, str(image_path))
