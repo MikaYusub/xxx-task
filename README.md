@@ -29,6 +29,10 @@ docker compose up --build
 The default Docker path uses fake deterministic inference so reviewers can verify the pipeline
 quickly. Generated PNGs are still written to `outputs/{doc_id}.png`.
 
+Wait for the Firebase container to print `All emulators ready! It is now safe to connect your app.`
+before using the Emulator UI or the reviewer console. `npm run demo` also waits for the Auth,
+Firestore, and Functions emulator ports before it starts the Publisher.
+
 3. In another shell, create a request:
 
 ```bash
