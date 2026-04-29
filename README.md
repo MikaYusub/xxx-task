@@ -168,7 +168,7 @@ rejected.
 
 ## Checks
 
-Use Node 20 or the Docker workflow for JavaScript checks.
+Use Node 20 and JDK 21, or the Docker workflow, for JavaScript checks.
 
 ```bash
 npm run build
