@@ -12,6 +12,7 @@ service cloud.firestore {
         && request.resource.data.status == 'CREATED';
 
       allow read: if request.auth != null
+        && resource.data != null
         && resource.data.user_id == request.auth.uid;
 
       allow update, delete: if false;

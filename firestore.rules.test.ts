@@ -92,3 +92,9 @@ test("rejects client updates and deletes", async () => {
   await assertFails(updateDoc(ref, { status: "QUEUED" }));
   await assertFails(deleteDoc(ref));
 });
+
+test("rejects missing document reads without rule evaluation errors", async () => {
+  const db = testEnv.authenticatedContext(userId).firestore();
+
+  await assertFails(getDoc(doc(db, "generation_requests/missing-doc")));
+});
