@@ -11,9 +11,11 @@ service cloud.firestore {
         && request.resource.data.prompt.size() <= 1000
         && request.resource.data.status == 'CREATED';
 
-      allow read: if request.auth != null
-        && resource.data != null
+      allow get: if request.auth != null
+        && exists(/databases/$(database)/documents/generation_requests/$(docId))
         && resource.data.user_id == request.auth.uid;
+
+      allow list: if false;
 
       allow update, delete: if false;
     }
