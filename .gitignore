@@ -12,3 +12,4 @@ __pycache__/
 outputs/
 cache/
 *.log
+.playwright-cli/
