@@ -1,6 +1,10 @@
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("config service", () => {
   it("returns 404 for unknown users", async () => {
@@ -10,6 +14,7 @@ describe("config service", () => {
   });
 
   it("returns a LoRA config after local seeding", async () => {
+    vi.stubEnv("ENABLE_LOCAL_ENDPOINTS", "true");
     const app = createApp();
 
     await request(app).post("/v1/local/users/user-1").expect(201);
@@ -22,6 +27,7 @@ describe("config service", () => {
   });
 
   it("returns a predefined LoRA config on each seeded lookup", async () => {
+    vi.stubEnv("ENABLE_LOCAL_ENDPOINTS", "true");
     const app = createApp();
 
     await request(app).post("/v1/local/users/user-1").expect(201);
@@ -36,5 +42,11 @@ describe("config service", () => {
     const response = await request(createApp()).options("/v1/local/users/user-1").expect(204);
 
     expect(response.headers["access-control-allow-origin"]).toBe("*");
+  });
+
+  it("hides local seed endpoint unless local endpoints are enabled", async () => {
+    vi.stubEnv("ENABLE_LOCAL_ENDPOINTS", "false");
+
+    await request(createApp()).post("/v1/local/users/user-1").expect(404);
   });
 });

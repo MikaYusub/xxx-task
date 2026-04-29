@@ -70,7 +70,8 @@ Use it for a quick visual smoke test:
 3. Check `outputs/{doc_id}.png` after the request finishes.
 
 The LoRA checkbox calls the local Config Service seed endpoint before creating the Firestore
-request. In real inference mode, that path loads the returned LoRA with Diffusers and PEFT.
+request. Docker enables `ENABLE_LOCAL_ENDPOINTS=true` for this review-only helper. In real
+inference mode, that path loads the returned LoRA with Diffusers and PEFT.
 
 ## Model
 
@@ -102,6 +103,9 @@ Required values are shown in `.env.example`.
 
 `INFERENCE_MODE=fake` is the default for fast local verification. The real Docker override sets
 `INFERENCE_MODE=real`.
+
+`ENABLE_LOCAL_ENDPOINTS=true` enables local-only reviewer helpers such as Config seeding and
+runtime inference-mode switching. Leave it unset or set it to `false` outside local review.
 
 ## Publisher Client
 
@@ -156,7 +160,8 @@ GET /v1/config/{user_id}
 POST /v1/local/users/{user_id}
 ```
 
-Adds an anonymous local test user to the Config allowlist.
+Adds an anonymous local test user to the Config allowlist. This route returns `404` unless
+`ENABLE_LOCAL_ENDPOINTS=true`.
 
 ## Inference API
 

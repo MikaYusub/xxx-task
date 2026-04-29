@@ -117,6 +117,7 @@ generation documents. The inference API requires `Authorization: Bearer <API_KEY
 stores secrets in Secret Manager and uses least-privilege service accounts.
 
 LoRA URLs are restricted to trusted hosts. Prompt and `lora_weight` are validated before processing.
+Local helper endpoints under `/v1/local/*` are disabled unless `ENABLE_LOCAL_ENDPOINTS=true`.
 Security rules are covered by emulator tests for valid create, missing prompt, wrong user, invalid
 initial status, update, and delete.
 

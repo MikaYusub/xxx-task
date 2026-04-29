@@ -82,12 +82,15 @@ def healthz():
 
 @app.get("/v1/local/mode")
 def get_mode():
+    require_local_endpoints()
     return {"mode": runtime_mode}
 
 
 @app.post("/v1/local/mode")
 def set_mode(request: ModeRequest):
     global runtime_mode
+
+    require_local_endpoints()
 
     if request.mode not in ["fake", "real"]:
         raise HTTPException(status_code=422, detail="mode must be fake or real")
@@ -137,6 +140,11 @@ def generate(request: GenerateRequest = Body(), authorization: str = Header(""))
 def require_auth(authorization: str):
     if authorization != f"Bearer {api_key}":
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def require_local_endpoints():
+    if os.environ.get("ENABLE_LOCAL_ENDPOINTS") != "true":
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 def validate_request(request: GenerateRequest):

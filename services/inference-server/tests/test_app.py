@@ -126,6 +126,7 @@ def test_rejects_unknown_generate_fields(tmp_path, monkeypatch):
 
 
 def test_local_mode_switches_to_fake(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENABLE_LOCAL_ENDPOINTS", "true")
     test_client, _completed, _failed = make_client(tmp_path, monkeypatch)
 
     response = test_client.post("/v1/local/mode", json={"mode": "fake"})
@@ -136,11 +137,21 @@ def test_local_mode_switches_to_fake(tmp_path, monkeypatch):
 
 
 def test_local_mode_rejects_unknown_mode(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENABLE_LOCAL_ENDPOINTS", "true")
     test_client, _completed, _failed = make_client(tmp_path, monkeypatch)
 
     response = test_client.post("/v1/local/mode", json={"mode": "turbo"})
 
     assert response.status_code == 422
+
+
+def test_local_mode_is_hidden_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("ENABLE_LOCAL_ENDPOINTS", raising=False)
+    test_client, _completed, _failed = make_client(tmp_path, monkeypatch)
+
+    response = test_client.get("/v1/local/mode")
+
+    assert response.status_code == 404
 
 
 def test_stale_worker_cannot_fail_reclaimed_job():

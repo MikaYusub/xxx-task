@@ -30,6 +30,8 @@ services:
       context: services/config-service
     env_file:
       - .env
+    environment:
+      ENABLE_LOCAL_ENDPOINTS: "true"
     ports:
       - "3000:3000"
 
@@ -42,6 +44,7 @@ services:
       FIRESTORE_EMULATOR_HOST: firebase:8080
       GOOGLE_CLOUD_PROJECT: demo-local
       INFERENCE_MODE: fake
+      ENABLE_LOCAL_ENDPOINTS: "true"
       OUTPUT_DIR: /app/outputs
       LORA_CACHE_DIR: /app/cache/lora
     ports:

@@ -27,10 +27,12 @@ export function createApp() {
     response.json({ ok: true });
   });
 
-  app.post("/v1/local/users/:user_id", (request, response) => {
-    seededUsers.add(request.params.user_id);
-    response.status(201).json({ user_id: request.params.user_id });
-  });
+  if (process.env.ENABLE_LOCAL_ENDPOINTS === "true") {
+    app.post("/v1/local/users/:user_id", (request, response) => {
+      seededUsers.add(request.params.user_id);
+      response.status(201).json({ user_id: request.params.user_id });
+    });
+  }
 
   app.get("/v1/config/:user_id", (request, response) => {
     if (!seededUsers.has(request.params.user_id)) {
