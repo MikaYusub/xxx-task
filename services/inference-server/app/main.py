@@ -50,6 +50,8 @@ class NoLoraGenerateRequest(BaseModel):
 
 
 class LoraGenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     doc_id: str
     prompt: str
     lora_url: str
@@ -258,9 +260,9 @@ def write_real_image(request: GenerateRequest, path: Path):
     try:
         if has_lora(request):
             lora_path = download_lora(request.lora_url)
-            pipe.load_lora_weights(str(lora_path))
+            pipe.load_lora_weights(str(lora_path), adapter_name="style")
             if hasattr(pipe, "set_adapters"):
-                pipe.set_adapters(["default"], adapter_weights=[request.lora_weight])
+                pipe.set_adapters(["style"], adapter_weights=[request.lora_weight])
 
         image = pipe(
             request.prompt,
