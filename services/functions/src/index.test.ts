@@ -197,6 +197,45 @@ describe("generation request function", () => {
     expect(docs.get("doc-1")?.error_code).toBe("INFERENCE_UNREACHABLE");
   });
 
+  it("does not fail jobs already processing in inference", async () => {
+    const functions = await loadFunctions();
+    docs.set("doc-1", { status: "CREATED", user_id: "user-1", prompt: "hello" });
+    fetchMock
+      .mockResolvedValueOnce({ status: 404, ok: false })
+      .mockResolvedValueOnce({
+        status: 409,
+        ok: false,
+        text: async () => '{"detail":"Job is already processing"}',
+      });
+
+    await functions.onGenerationRequestCreated({
+      params: { docId: "doc-1" },
+      data: { data: () => docs.get("doc-1") },
+    });
+
+    expect(docs.get("doc-1")?.status).toBe("QUEUED");
+  });
+
+  it("marks unexpected inference conflicts as failed", async () => {
+    const functions = await loadFunctions();
+    docs.set("doc-1", { status: "CREATED", user_id: "user-1", prompt: "hello" });
+    fetchMock
+      .mockResolvedValueOnce({ status: 404, ok: false })
+      .mockResolvedValueOnce({
+        status: 409,
+        ok: false,
+        text: async () => '{"detail":"Job is CREATED"}',
+      });
+
+    await functions.onGenerationRequestCreated({
+      params: { docId: "doc-1" },
+      data: { data: () => docs.get("doc-1") },
+    });
+
+    expect(docs.get("doc-1")?.status).toBe("FAILED");
+    expect(docs.get("doc-1")?.error_code).toBe("INFERENCE_ERROR");
+  });
+
   it("ignores duplicate create delivery after CREATED is gone", async () => {
     const functions = await loadFunctions();
     docs.set("doc-1", { status: "QUEUED", user_id: "user-1", prompt: "hello" });

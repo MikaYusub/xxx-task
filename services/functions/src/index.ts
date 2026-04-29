@@ -206,14 +206,16 @@ async function postInference(body: InferenceRequest) {
       return { type: "ok" as const };
     }
 
-    if (response.status === 409) {
+    const message = await response.text();
+
+    if (response.status === 409 && message.includes("already processing")) {
       return { type: "duplicate" as const };
     }
 
     return {
       type: "failed" as const,
       errorCode: "INFERENCE_ERROR",
-      message: await response.text(),
+      message,
     };
   } catch (error) {
     return {
