@@ -50,6 +50,28 @@ The Publisher prints the anonymous user id and Firestore document id. Use the Fi
 Emulator UI at `http://127.0.0.1:4000/firestore` to inspect request status. Generated PNGs are
 written to `outputs/{doc_id}.png`.
 
+## Reviewer Console
+
+After `docker compose up --build`, open `docs/reviewer-console.html` in a browser. The page signs in
+with anonymous Firebase Auth, writes the same Firestore shape as the Publisher, watches the request
+status live, and shows the generated PNG when the job finishes.
+
+If the browser blocks local file previews, serve the repository root and open
+`http://127.0.0.1:4173/docs/reviewer-console.html`:
+
+```bash
+python -m http.server 4173 --bind 127.0.0.1
+```
+
+Use it for a quick visual smoke test:
+
+1. Submit a prompt.
+2. Watch `CREATED -> QUEUED -> PROCESSING -> DONE`.
+3. Check `outputs/{doc_id}.png` after the request finishes.
+
+The LoRA checkbox calls the local Config Service seed endpoint before creating the Firestore
+request. In real inference mode, that path loads the returned LoRA with Diffusers and PEFT.
+
 ## Model
 
 The fast Docker path runs fake inference by default. To run the required CPU diffusion model:
@@ -193,3 +215,4 @@ to exercise that path; otherwise run the full Docker stack.
 
 - `README.md`: local setup and API documentation.
 - `DESIGN.md`: architecture, trade-offs, scaling, retries, stuck-job recovery, and production deployment notes.
+- `docs/reviewer-console.html`: static local smoke-test console.

@@ -12,11 +12,16 @@ The local case implementation has four services:
 Firestore is the canonical job-state store. The local filesystem only stores image artifacts at
 `outputs/{doc_id}.png`.
 
-The default Docker run installs Diffusers with the CPU PyTorch wheel and runs the required
+`docs/reviewer-console.html` is a static reviewer tool, not another backend service. It uses the
+same anonymous Firebase Auth and Firestore create path as the Publisher, then listens to the request
+document so reviewers can watch the state machine.
+
+The default Docker run uses fake deterministic inference so the full pipeline can be verified
+quickly. The real Docker override installs Diffusers with the CPU PyTorch wheel and runs the required
 `SimianLuo/LCM_Dreamshaper_v7` model with `LCMScheduler`, `steps=4`, and `guidance_scale=8.0`.
-The inference server preloads the pipeline on startup and persists the Hugging Face cache on disk so
-the first request does not spend the Cloud Function timeout budget downloading weights. Tests force
-fake deterministic PNGs.
+The real inference server preloads the pipeline on startup and persists the Hugging Face cache on
+disk so the first request does not spend the Cloud Function timeout budget downloading weights.
+Tests also force fake deterministic PNGs.
 
 ## State and Idempotency
 
@@ -50,16 +55,29 @@ If the process crashes mid-generation, the lease expires and scheduled recovery 
 The local Docker stack runs the Pub/Sub emulator so the scheduled Firebase Functions v2 recovery
 job is active during emulator demos.
 
-## Scaling Answers
+## Scaling Path
 
-The local synchronous Function-to-inference call matches the case and is easy to run in emulators.
-It does not scale because slow CPU inference keeps Function instances open, concurrent requests can
-overload the inference server, and retries amplify load.
+The local path is intentionally synchronous:
 
-For 10x to 100x production traffic, the Cloud Function should enqueue jobs into Cloud Tasks or
-Pub/Sub instead of calling inference directly. Workers should consume with bounded concurrency,
-exponential backoff, dead-letter handling, queue depth monitoring, and optional per-user rate limits.
-Backpressure belongs at the queue and worker pool, not inside Firestore triggers.
+`Publisher -> Firestore -> Function -> Inference -> Firestore + local outputs`
+
+That is the simplest emulator-friendly implementation, but it is not the production scaling shape.
+If 100 users submit at once, Functions wait on slow inference, workers saturate, config lookups add
+latency, and retries can create extra load.
+
+Production should add one boundary:
+
+`Publisher -> Firestore -> Function -> Cloud Tasks/Pub/Sub -> workers -> Firestore + Cloud Storage`
+
+Keep ownership simple:
+
+- Firestore owns request state.
+- The Function owns validation, config snapshotting, and enqueue.
+- The queue owns delivery retries, backoff, dead-letter handling, and backlog visibility.
+- Workers own bounded generation concurrency and output writes.
+
+This keeps backpressure out of Firestore triggers and avoids making the synchronous local MVP carry
+production concerns.
 
 ## Stuck PROCESSING Recovery
 
@@ -68,12 +86,22 @@ A scheduled recovery function queries expired leases. It requeues jobs below the
 marks exhausted jobs `FAILED`. Recovery only reclaims a job if the lease is still expired inside the
 transaction.
 
+This also makes `/generate` safe to call more than once for the same `doc_id`. The endpoint uses the
+document ID as the idempotency key. A transaction returns the existing result for `DONE`, rejects a
+valid `PROCESSING` lease, claims `QUEUED`, and only reclaims `PROCESSING` after the lease expires.
+This prevents duplicate output writes and double compute for normal retries.
+
 ## Per-User LoRA Serving at Scale
 
 The local inference server downloads LoRAs into a local cache directory keyed by URL hash.
 Production should store LoRAs in object storage with versioned or content-addressed paths. Workers
 should load adapters on demand, use a bounded disk cache, evict by size and last access, and avoid
 keeping thousands of 50-200 MB LoRAs in memory.
+
+For thousands of unique LoRAs, the queued request should snapshot the exact LoRA URL and version.
+Workers keep the base model warm, route by `user_id`, `lora_url`, or `model_family` for cache
+locality when possible, and still allow any compatible worker to retry the job. Separate worker
+pools are useful when model families or GPU shapes differ.
 
 ## Cost and Latency Drivers
 

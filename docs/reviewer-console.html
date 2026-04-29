@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codeway Local Generation Console</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #162027;
+      --muted: #596773;
+      --line: #d8e0e6;
+      --paper: #ffffff;
+      --wash: #f4f7f9;
+      --accent: #0d6759;
+      --accent-soft: #e0f2ed;
+      --bad: #9d2f24;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--wash);
+      color: var(--ink);
+    }
+
+    main {
+      width: min(960px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0;
+    }
+
+    header {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+
+    h1, h2, p { margin: 0; }
+
+    h1 {
+      font-size: 30px;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    p, label, output {
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+
+    section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      padding: 16px;
+    }
+
+    form, .stack {
+      display: grid;
+      gap: 12px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 128px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      font: inherit;
+      color: var(--ink);
+    }
+
+    button {
+      width: fit-content;
+      min-height: 38px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      padding: 0 12px;
+      background: var(--accent);
+      color: white;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: wait;
+    }
+
+    .mode {
+      display: flex;
+      width: fit-content;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+
+    .mode label {
+      min-width: 86px;
+      padding: 8px 10px;
+      color: var(--ink);
+      text-align: center;
+      cursor: pointer;
+    }
+
+    .mode input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .mode label:has(input:checked) {
+      background: var(--accent);
+      color: white;
+    }
+
+    .check {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .check input {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+    }
+
+    .status {
+      display: inline-block;
+      width: fit-content;
+      border-radius: 999px;
+      padding: 5px 10px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    dl {
+      display: grid;
+      grid-template-columns: 112px 1fr;
+      gap: 8px 12px;
+      margin: 0;
+    }
+
+    dt {
+      color: var(--muted);
+    }
+
+    dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+
+    pre {
+      min-height: 152px;
+      margin: 0;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      background: #f8fafb;
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .preview {
+      display: grid;
+      gap: 8px;
+    }
+
+    .preview[hidden] {
+      display: none;
+    }
+
+    .preview img {
+      width: 100%;
+      max-height: 512px;
+      object-fit: contain;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #f8fafb;
+    }
+
+    .error {
+      color: var(--bad);
+    }
+
+    @media (max-width: 760px) {
+      main { width: min(100% - 20px, 960px); }
+      h1 { font-size: 25px; }
+      .layout { grid-template-columns: 1fr; }
+      dl { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Local Generation Console</h1>
+      <p>Submit through anonymous Firebase Auth, then watch the Firestore state machine move.</p>
+    </header>
+
+    <div class="layout">
+      <section>
+        <form id="form">
+          <h2>Create request</h2>
+          <label>Generation mode</label>
+          <div class="mode" id="mode">
+            <label title="Fast deterministic PNG for smoke tests">
+              <input name="mode" type="radio" value="fake">
+              Fake
+            </label>
+            <label title="CPU Diffusers generation with the required model">
+              <input name="mode" type="radio" value="real">
+              Real
+            </label>
+          </div>
+          <label for="prompt">Prompt</label>
+          <textarea id="prompt" maxlength="1000" required>a forest cabin in winter, oil painting style</textarea>
+          <label class="check">
+            <input id="seed" type="checkbox">
+            Use local LoRA style config
+          </label>
+          <button id="submit" type="submit">Create request</button>
+          <output id="message"></output>
+        </form>
+      </section>
+
+      <section class="stack">
+        <h2>Request state</h2>
+        <div id="status" class="status">READY</div>
+        <dl>
+          <dt>User</dt>
+          <dd id="user">Not signed in</dd>
+          <dt>Document</dt>
+          <dd id="doc">None</dd>
+          <dt>Output</dt>
+          <dd id="output">None</dd>
+          <dt>Error</dt>
+          <dd id="error">None</dd>
+        </dl>
+        <div id="preview" class="preview" hidden>
+          <h2>Generated image</h2>
+          <img id="image" alt="Generated image">
+        </div>
+        <pre id="raw">{}</pre>
+      </section>
+    </div>
+  </main>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+    import {
+      connectAuthEmulator,
+      getAuth,
+      onAuthStateChanged,
+      signInAnonymously
+    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+    import {
+      addDoc,
+      collection,
+      connectFirestoreEmulator,
+      doc,
+      getFirestore,
+      onSnapshot
+    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+    const projectId = "demo-local";
+    const configServiceUrl = "http://127.0.0.1:3000";
+    const inferenceServerUrl = "http://127.0.0.1:8000";
+    const storageKey = "codeway:last-request";
+    const app = initializeApp({
+      apiKey: "demo-local",
+      authDomain: `${projectId}.firebaseapp.com`,
+      projectId
+    });
+    const auth = getAuth(app);
+    const firestore = getFirestore(app);
+    let unsubscribe = () => {};
+    let imagePoll = 0;
+
+    connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+    connectFirestoreEmulator(firestore, "127.0.0.1", 8080);
+
+    const form = document.getElementById("form");
+    const mode = document.getElementById("mode");
+    const submit = document.getElementById("submit");
+    const prompt = document.getElementById("prompt");
+    const seed = document.getElementById("seed");
+    const message = document.getElementById("message");
+    const status = document.getElementById("status");
+    const user = document.getElementById("user");
+    const docId = document.getElementById("doc");
+    const output = document.getElementById("output");
+    const error = document.getElementById("error");
+    const preview = document.getElementById("preview");
+    const image = document.getElementById("image");
+    const raw = document.getElementById("raw");
+
+    syncMode();
+    restoreLastRequest();
+    ensureUser().then((signedInUser) => {
+      user.textContent = signedInUser.uid;
+      const last = loadLastRequest();
+
+      if (last && last.userId === signedInUser.uid) {
+        watchRequest(last.docId);
+      } else if (last) {
+        clearLastRequest();
+      }
+    });
+
+    mode.addEventListener("change", async (event) => {
+      const selectedMode = event.target.value;
+      message.textContent = `Switching to ${selectedMode} mode...`;
+      message.className = "";
+
+      try {
+        await setMode(selectedMode);
+        message.textContent = `Generation mode: ${selectedMode}.`;
+      } catch (err) {
+        message.textContent = readableError(err);
+        message.className = "error";
+        await syncMode();
+      }
+    });
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      submit.disabled = true;
+      message.textContent = "Signing in anonymously...";
+      message.className = "";
+
+      try {
+        const signedInUser = await ensureUser();
+        const userId = signedInUser.uid;
+        user.textContent = userId;
+
+        if (seed.checked) {
+          message.textContent = "Seeding local LoRA config...";
+          const seedResponse = await fetch(`${configServiceUrl}/v1/local/users/${encodeURIComponent(userId)}`, {
+            method: "POST"
+          });
+          assert(seedResponse.ok, "Local LoRA config seed failed");
+        }
+
+        message.textContent = "Creating Firestore request...";
+        const request = await addDoc(collection(firestore, "generation_requests"), {
+          user_id: userId,
+          prompt: prompt.value.trim(),
+          status: "CREATED"
+        });
+
+        docId.textContent = request.id;
+        saveLastRequest(request.id, userId, null);
+        watchRequest(request.id);
+        message.textContent = "Request created. Watching Firestore...";
+      } catch (err) {
+        message.textContent = err.message;
+        message.className = "error";
+      } finally {
+        submit.disabled = false;
+      }
+    });
+
+    async function ensureUser() {
+      const loadedUser = await loadedAuthUser();
+
+      if (loadedUser) {
+        return loadedUser;
+      }
+
+      const credential = await signInAnonymously(auth);
+      return credential.user;
+    }
+
+    function loadedAuthUser() {
+      return new Promise((resolve) => {
+        const unsubscribeAuth = onAuthStateChanged(auth, (loadedUser) => {
+          unsubscribeAuth();
+          resolve(loadedUser);
+        });
+      });
+    }
+
+    function watchRequest(id) {
+      unsubscribe();
+      clearInterval(imagePoll);
+      status.textContent = "WATCHING";
+      message.textContent = "Watching Firestore...";
+      message.className = "";
+      imagePoll = setInterval(() => renderImage(id, false), 5000);
+
+      unsubscribe = onSnapshot(doc(firestore, "generation_requests", id), (snapshot) => {
+        assert(snapshot.exists(), "Request document was not found");
+        const data = snapshot.data();
+        renderRequest(id, data);
+        saveLastRequest(id, data.user_id, data);
+        message.textContent = terminalStatus(data.status) ? `Finished with ${data.status}.` : `Current status: ${data.status}.`;
+      }, (err) => {
+        clearLastRequest();
+        unsubscribe();
+        clearInterval(imagePoll);
+        message.textContent = "The saved request is not readable with this local user. Create a new request.";
+        message.className = "error";
+      });
+    }
+
+    function restoreLastRequest() {
+      const last = loadLastRequest();
+
+      if (!last) {
+        return;
+      }
+
+      docId.textContent = last.docId;
+      user.textContent = last.userId;
+
+      if (last.data) {
+        renderRequest(last.docId, last.data);
+        message.textContent = "Restored last known request. Reconnecting to Firestore...";
+      }
+    }
+
+    function renderRequest(id, data) {
+      docId.textContent = id;
+      user.textContent = data.user_id;
+      status.textContent = data.status;
+      output.textContent = data.output_path || "None";
+      error.textContent = data.error_code || "None";
+      renderImage(id, data.status === "DONE");
+      raw.textContent = JSON.stringify(data, null, 2);
+    }
+
+    function renderImage(id, keepVisible) {
+      image.onload = () => {
+        preview.hidden = false;
+      };
+      image.onerror = () => {
+        if (!keepVisible) {
+          preview.hidden = true;
+        }
+      };
+
+      if (!id) {
+        preview.hidden = true;
+        image.removeAttribute("src");
+        return;
+      }
+
+      image.src = `../outputs/${id}.png?${Date.now()}`;
+    }
+
+    async function syncMode() {
+      const response = await fetch(`${inferenceServerUrl}/v1/local/mode`);
+      const body = await response.json();
+      const input = document.querySelector(`input[name="mode"][value="${body.mode}"]`);
+      assert(input, "Unknown inference mode");
+      input.checked = true;
+    }
+
+    async function setMode(value) {
+      const response = await fetch(`${inferenceServerUrl}/v1/local/mode`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: value })
+      });
+      assert(response.ok, "Inference mode switch failed");
+    }
+
+    function saveLastRequest(id, userId, data) {
+      localStorage.setItem(storageKey, JSON.stringify({ docId: id, userId, data }));
+    }
+
+    function clearLastRequest() {
+      localStorage.removeItem(storageKey);
+    }
+
+    function loadLastRequest() {
+      const value = localStorage.getItem(storageKey);
+      return value ? JSON.parse(value) : null;
+    }
+
+    function terminalStatus(value) {
+      return value === "DONE" || value === "FAILED";
+    }
+
+    function assert(condition, message) {
+      if (!condition) {
+        throw new Error(message);
+      }
+    }
+
+    function readableError(error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  </script>
+</body>
+</html>
