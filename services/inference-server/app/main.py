@@ -348,7 +348,15 @@ def download_lora(url: str):
     if path.exists():
         return path
 
-    response = requests.get(url, timeout=60)
-    response.raise_for_status()
-    path.write_bytes(response.content)
+    tmp_path = lora_cache_dir / f"{filename}.{uuid.uuid4()}.tmp"
+
+    try:
+        response = requests.get(url, timeout=60)
+        response.raise_for_status()
+        tmp_path.write_bytes(response.content)
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
     return path

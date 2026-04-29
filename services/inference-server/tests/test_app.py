@@ -274,3 +274,39 @@ def test_real_lora_is_loaded_with_named_adapter(tmp_path, monkeypatch):
     assert ("load", str(tmp_path / "adapter.safetensors"), "style") in calls
     assert ("set", ["style"], [0.8]) in calls
     assert ("run", "hello", 4, 8.0) in calls
+
+
+def test_download_lora_writes_cache_atomically(tmp_path, monkeypatch):
+    class Response:
+        content = b"adapter"
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(main, "lora_cache_dir", tmp_path)
+    monkeypatch.setattr(main.requests, "get", lambda _url, timeout: Response())
+
+    path = main.download_lora("https://huggingface.co/org/model/resolve/main/adapter.safetensors")
+
+    assert path.read_bytes() == b"adapter"
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_download_lora_removes_temp_file_on_replace_failure(tmp_path, monkeypatch):
+    class Response:
+        content = b"adapter"
+
+        def raise_for_status(self):
+            return None
+
+    def fail_replace(_source, _target):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(main, "lora_cache_dir", tmp_path)
+    monkeypatch.setattr(main.requests, "get", lambda _url, timeout: Response())
+    monkeypatch.setattr(main.os, "replace", fail_replace)
+
+    with pytest.raises(OSError):
+        main.download_lora("https://huggingface.co/org/model/resolve/main/adapter.safetensors")
+
+    assert list(tmp_path.iterdir()) == []

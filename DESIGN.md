@@ -94,6 +94,8 @@ This prevents duplicate output writes and double compute for normal retries.
 ## Per-User LoRA Serving at Scale
 
 The local inference server downloads LoRAs into a local cache directory keyed by URL hash.
+Downloads are written to a temporary file and atomically renamed into the cache so partial files are
+not reused after a crash or failed download.
 Production should store LoRAs in object storage with versioned or content-addressed paths. Workers
 should load adapters on demand, use a bounded disk cache, evict by size and last access, and avoid
 keeping thousands of 50-200 MB LoRAs in memory.
