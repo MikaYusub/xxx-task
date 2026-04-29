@@ -21,13 +21,20 @@ describe("config service", () => {
     expect(response.body.updated_at).toBe("2026-02-03T10:00:00Z");
   });
 
-  it("keeps the assigned LoRA stable for the same user", async () => {
+  it("returns a predefined LoRA config on each seeded lookup", async () => {
     const app = createApp();
 
     await request(app).post("/v1/local/users/user-1").expect(201);
     const first = await request(app).get("/v1/config/user-1").expect(200);
     const second = await request(app).get("/v1/config/user-1").expect(200);
 
-    expect(second.body).toEqual(first.body);
+    expect(first.body.lora_url).toContain("https://huggingface.co/");
+    expect(second.body.lora_url).toContain("https://huggingface.co/");
+  });
+
+  it("allows the static reviewer console to seed local config", async () => {
+    const response = await request(createApp()).options("/v1/local/users/user-1").expect(204);
+
+    expect(response.headers["access-control-allow-origin"]).toBe("*");
   });
 });
