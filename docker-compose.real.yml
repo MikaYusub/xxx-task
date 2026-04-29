@@ -1,0 +1,7 @@
+services:
+  inference-server:
+    build:
+      args:
+        REQUIREMENTS: requirements-real.txt
+    environment:
+      INFERENCE_MODE: real

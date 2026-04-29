@@ -5,8 +5,10 @@ services:
       dockerfile: docker/firebase/Dockerfile
     command: sh -c "npm install && npm run build --workspaces --if-present && npx firebase emulators:start --project demo-local --only auth,firestore,functions,pubsub"
     depends_on:
-      - config-service
-      - inference-server
+      config-service:
+        condition: service_started
+      inference-server:
+        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -39,11 +41,17 @@ services:
     environment:
       FIRESTORE_EMULATOR_HOST: firebase:8080
       GOOGLE_CLOUD_PROJECT: demo-local
-      INFERENCE_MODE: real
+      INFERENCE_MODE: fake
       OUTPUT_DIR: /app/outputs
       LORA_CACHE_DIR: /app/cache/lora
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
     volumes:
       - ./outputs:/app/outputs
       - ./cache:/app/cache

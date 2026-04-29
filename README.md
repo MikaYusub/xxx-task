@@ -26,8 +26,8 @@ cp .env.example .env
 docker compose up --build
 ```
 
-The first startup downloads the Diffusers model into `cache/huggingface` and can take several
-minutes on CPU. Wait until the inference server reports startup complete before submitting a prompt.
+The default Docker path uses fake deterministic inference so reviewers can verify the pipeline
+quickly. Generated PNGs are still written to `outputs/{doc_id}.png`.
 
 3. In another shell, create a request:
 
@@ -52,10 +52,17 @@ written to `outputs/{doc_id}.png`.
 
 ## Model
 
-The default Docker path installs `services/inference-server/requirements-real.txt`, including the
-CPU PyTorch wheel, and runs
-`SimianLuo/LCM_Dreamshaper_v7` with `LCMScheduler`, `steps=4`, and `guidance_scale=8.0`.
-The model cache is persisted at `cache/huggingface`.
+The fast Docker path runs fake inference by default. To run the required CPU diffusion model:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.real.yml up --build
+```
+
+The real path installs `services/inference-server/requirements-real.txt`, including the CPU PyTorch
+wheel, and runs `SimianLuo/LCM_Dreamshaper_v7` with `LCMScheduler`, `steps=4`, and
+`guidance_scale=8.0`. The first startup downloads the model into `cache/huggingface` and can take
+several minutes on CPU. The real requirements also install PEFT because Diffusers needs it to load
+LoRA adapters.
 
 ## Local Ports
 
@@ -71,8 +78,8 @@ The model cache is persisted at `cache/huggingface`.
 
 Required values are shown in `.env.example`.
 
-`INFERENCE_MODE=real` is the Docker default. Tests set `INFERENCE_MODE=fake` themselves so they stay
-fast and deterministic.
+`INFERENCE_MODE=fake` is the default for fast local verification. The real Docker override sets
+`INFERENCE_MODE=real`.
 
 ## Publisher Client
 
