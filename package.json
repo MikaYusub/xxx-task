@@ -11,6 +11,10 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier \"**/*.{ts,js,mjs,json}\" --write",
+    "format:check": "prettier \"**/*.{ts,js,mjs,json}\" --check",
     "test": "npm run test:workspaces && npm run test:rules",
     "test:workspaces": "npm test --workspaces --if-present",
     "test:rules": "firebase emulators:exec --project demo-local --only firestore \"vitest run firestore.rules.test.ts\"",
@@ -19,9 +23,15 @@
     "config": "npm --workspace services/config-service run dev"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@firebase/rules-unit-testing": "^5.0.0",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
     "firebase-tools": "^15.15.0",
+    "globals": "^17.6.0",
+    "prettier": "^3.8.3",
     "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.3",
     "vitest": "^2.1.9"
   }
 }

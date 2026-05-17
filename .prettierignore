@@ -1,0 +1,7 @@
+node_modules
+dist
+cache
+outputs
+.playwright-cli
+.pytest_cache
+*.log

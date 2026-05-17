@@ -1,3 +1,4 @@
+import assert from "node:assert";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const docs = new Map<string, Record<string, unknown>>();
@@ -33,11 +34,11 @@ vi.mock("firebase-functions/v2", () => ({
 }));
 
 vi.mock("firebase-functions/v2/firestore", () => ({
-  onDocumentCreated: vi.fn((_path, handler) => handler),
+  onDocumentCreated: vi.fn((_path: string, handler: unknown) => handler),
 }));
 
 vi.mock("firebase-functions/v2/scheduler", () => ({
-  onSchedule: vi.fn((_schedule, handler) => handler),
+  onSchedule: vi.fn((_schedule: string, handler: unknown) => handler),
 }));
 
 vi.mock("firebase-admin/firestore", () => ({
@@ -47,31 +48,36 @@ vi.mock("firebase-admin/firestore", () => ({
     collection: () => ({
       doc: (id: string) => ({
         id,
-        update: async (patch: Record<string, unknown>) => {
+        update: (patch: Record<string, unknown>) => {
           const data = docs.get(id);
-          expect(data).toBeDefined();
-          docs.set(id, applyPatch(data!, patch));
+          assert(data);
+          docs.set(id, applyPatch(data, patch));
+          return Promise.resolve();
         },
       }),
     }),
-    runTransaction: async (callback: (transaction: Transaction) => Promise<unknown>) =>
-      callback(new Transaction()),
+    runTransaction: async (
+      callback: (transaction: Transaction) => Promise<unknown>,
+    ) => callback(new Transaction()),
   }),
 }));
 
 class Transaction {
-  async get(ref: { id: string }) {
-    return { data: () => docs.get(ref.id) };
+  get(ref: { id: string }) {
+    return Promise.resolve({ data: () => docs.get(ref.id) });
   }
 
   update(ref: { id: string }, patch: Record<string, unknown>) {
     const data = docs.get(ref.id);
-    expect(data).toBeDefined();
-    docs.set(ref.id, applyPatch(data!, patch));
+    assert(data);
+    docs.set(ref.id, applyPatch(data, patch));
   }
 }
 
-function applyPatch(data: Record<string, unknown>, patch: Record<string, unknown>) {
+function applyPatch(
+  data: Record<string, unknown>,
+  patch: Record<string, unknown>,
+) {
   const next = { ...data };
 
   for (const [key, value] of Object.entries(patch)) {
@@ -112,7 +118,11 @@ beforeEach(() => {
 describe("generation request function", () => {
   it("queues CREATED docs before dispatching to inference", async () => {
     const functions = await loadFunctions();
-    docs.set("doc-1", { status: "CREATED", user_id: "user-1", prompt: "hello" });
+    docs.set("doc-1", {
+      status: "CREATED",
+      user_id: "user-1",
+      prompt: "hello",
+    });
     fetchMock
       .mockResolvedValueOnce({ status: 404, ok: false })
       .mockResolvedValueOnce({ status: 200, ok: true });
@@ -134,7 +144,11 @@ describe("generation request function", () => {
 
   it("treats config 404 as no LoRA", async () => {
     const functions = await loadFunctions();
-    docs.set("doc-1", { status: "CREATED", user_id: "user-1", prompt: "hello" });
+    docs.set("doc-1", {
+      status: "CREATED",
+      user_id: "user-1",
+      prompt: "hello",
+    });
     fetchMock
       .mockResolvedValueOnce({ status: 404, ok: false })
       .mockResolvedValueOnce({ status: 200, ok: true });
@@ -144,13 +158,19 @@ describe("generation request function", () => {
       data: { data: () => docs.get("doc-1") },
     });
 
-    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    const inferenceCall = fetchMock.mock.calls[1];
+    const inferenceOptions = inferenceCall[1] as { body: string };
+    const body = JSON.parse(inferenceOptions.body) as unknown;
     expect(body).toEqual({ doc_id: "doc-1", prompt: "hello" });
   });
 
   it("fails the job when config returns 5xx twice", async () => {
     const functions = await loadFunctions();
-    docs.set("doc-1", { status: "CREATED", user_id: "user-1", prompt: "hello" });
+    docs.set("doc-1", {
+      status: "CREATED",
+      user_id: "user-1",
+      prompt: "hello",
+    });
     fetchMock
       .mockResolvedValueOnce({ status: 500, ok: false })
       .mockResolvedValueOnce({ status: 503, ok: false });
@@ -167,10 +187,18 @@ describe("generation request function", () => {
 
   it("marks inference 500 as failed", async () => {
     const functions = await loadFunctions();
-    docs.set("doc-1", { status: "CREATED", user_id: "user-1", prompt: "hello" });
+    docs.set("doc-1", {
+      status: "CREATED",
+      user_id: "user-1",
+      prompt: "hello",
+    });
     fetchMock
       .mockResolvedValueOnce({ status: 404, ok: false })
-      .mockResolvedValueOnce({ status: 500, ok: false, text: async () => "boom" });
+      .mockResolvedValueOnce({
+        status: 500,
+        ok: false,
+        text: () => Promise.resolve("boom"),
+      });
 
     await functions.onGenerationRequestCreated({
       params: { docId: "doc-1" },
@@ -183,7 +211,11 @@ describe("generation request function", () => {
 
   it("marks unreachable inference as failed", async () => {
     const functions = await loadFunctions();
-    docs.set("doc-1", { status: "CREATED", user_id: "user-1", prompt: "hello" });
+    docs.set("doc-1", {
+      status: "CREATED",
+      user_id: "user-1",
+      prompt: "hello",
+    });
     fetchMock
       .mockResolvedValueOnce({ status: 404, ok: false })
       .mockRejectedValueOnce(new Error("network down"));
@@ -199,13 +231,17 @@ describe("generation request function", () => {
 
   it("does not fail jobs already processing in inference", async () => {
     const functions = await loadFunctions();
-    docs.set("doc-1", { status: "CREATED", user_id: "user-1", prompt: "hello" });
+    docs.set("doc-1", {
+      status: "CREATED",
+      user_id: "user-1",
+      prompt: "hello",
+    });
     fetchMock
       .mockResolvedValueOnce({ status: 404, ok: false })
       .mockResolvedValueOnce({
         status: 409,
         ok: false,
-        text: async () => '{"detail":"Job is already processing"}',
+        text: () => Promise.resolve('{"detail":"Job is already processing"}'),
       });
 
     await functions.onGenerationRequestCreated({
@@ -218,13 +254,17 @@ describe("generation request function", () => {
 
   it("marks unexpected inference conflicts as failed", async () => {
     const functions = await loadFunctions();
-    docs.set("doc-1", { status: "CREATED", user_id: "user-1", prompt: "hello" });
+    docs.set("doc-1", {
+      status: "CREATED",
+      user_id: "user-1",
+      prompt: "hello",
+    });
     fetchMock
       .mockResolvedValueOnce({ status: 404, ok: false })
       .mockResolvedValueOnce({
         status: 409,
         ok: false,
-        text: async () => '{"detail":"Job is CREATED"}',
+        text: () => Promise.resolve('{"detail":"Job is CREATED"}'),
       });
 
     await functions.onGenerationRequestCreated({

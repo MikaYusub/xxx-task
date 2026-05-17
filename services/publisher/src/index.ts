@@ -1,10 +1,6 @@
 import assert from "node:assert";
 import { initializeApp } from "firebase/app";
-import {
-  connectAuthEmulator,
-  getAuth,
-  signInAnonymously,
-} from "firebase/auth";
+import { connectAuthEmulator, getAuth, signInAnonymously } from "firebase/auth";
 import {
   addDoc,
   collection,
@@ -17,7 +13,10 @@ const firestoreHost = process.env.FIRESTORE_EMULATOR_HOST ?? "127.0.0.1:8080";
 const authHost = process.env.FIREBASE_AUTH_EMULATOR_HOST ?? "127.0.0.1:9099";
 const args = process.argv.slice(2);
 const seedConfig = args.includes("--seed-config");
-const prompt = args.filter((arg) => arg !== "--seed-config").join(" ").trim();
+const prompt = args
+  .filter((arg) => arg !== "--seed-config")
+  .join(" ")
+  .trim();
 
 assert(prompt.length > 0, "Prompt is required");
 assert(prompt.length <= 1000, "Prompt must be at most 1000 characters");
@@ -32,17 +31,25 @@ const auth = getAuth(app);
 const firestore = getFirestore(app);
 
 connectAuthEmulator(auth, `http://${authHost}`, { disableWarnings: true });
-connectFirestoreEmulator(firestore, firestoreHost.split(":")[0], Number(firestoreHost.split(":")[1]));
+connectFirestoreEmulator(
+  firestore,
+  firestoreHost.split(":")[0],
+  Number(firestoreHost.split(":")[1]),
+);
 
 const credential = await signInAnonymously(auth);
 const userId = credential.user.uid;
 
 if (seedConfig) {
-  const configServiceUrl = process.env.CONFIG_SERVICE_URL ?? "http://127.0.0.1:3000";
+  const configServiceUrl =
+    process.env.CONFIG_SERVICE_URL ?? "http://127.0.0.1:3000";
 
-  await fetch(`${configServiceUrl}/v1/local/users/${encodeURIComponent(userId)}`, {
-    method: "POST",
-  });
+  await fetch(
+    `${configServiceUrl}/v1/local/users/${encodeURIComponent(userId)}`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 const doc = await addDoc(collection(firestore, "generation_requests"), {

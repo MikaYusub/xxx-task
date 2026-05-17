@@ -6,7 +6,11 @@ import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 
 initializeApp();
-setGlobalOptions({ region: "us-central1", timeoutSeconds: 540, memory: "512MiB" });
+setGlobalOptions({
+  region: "us-central1",
+  timeoutSeconds: 540,
+  memory: "512MiB",
+});
 
 const db = getFirestore();
 const maxAttempts = 3;
@@ -15,6 +19,12 @@ const inferenceTimeoutMs = 8 * 60_000;
 const configTtlMs = 60_000;
 
 type JobStatus = "CREATED" | "QUEUED" | "PROCESSING" | "DONE" | "FAILED";
+
+type GenerationRequest = {
+  user_id: string;
+  prompt: string;
+  status: JobStatus;
+};
 
 type LoraConfig = {
   lora_url: string;
@@ -48,34 +58,46 @@ export const onGenerationRequestCreated = onDocumentCreated(
       return;
     }
 
+    assertGenerationRequest(data);
+
     const queued = await queueCreatedRequest(docId);
 
     if (!queued) {
-      logger.info("create trigger ignored", { doc_id: docId, status: data.status });
+      logger.info("create trigger ignored", {
+        doc_id: docId,
+        status: data.status,
+      });
       return;
     }
 
-    await dispatchQueuedRequest(docId, String(data.user_id), String(data.prompt));
+    await dispatchQueuedRequest(docId, data.user_id, data.prompt);
   },
 );
 
-export const recoverStuckGenerationRequests = onSchedule("every 5 minutes", async () => {
-  const now = Timestamp.now();
-  const staleJobs = await db
-    .collection("generation_requests")
-    .where("status", "==", "PROCESSING")
-    .where("lease_expires_at", "<", now)
-    .limit(20)
-    .get();
+export const recoverStuckGenerationRequests = onSchedule(
+  "every 5 minutes",
+  async () => {
+    const now = Timestamp.now();
+    const staleJobs = await db
+      .collection("generation_requests")
+      .where("status", "==", "PROCESSING")
+      .where("lease_expires_at", "<", now)
+      .limit(20)
+      .get();
 
-  for (const staleJob of staleJobs.docs) {
-    const recovered = await recoverStaleJob(staleJob.id);
+    for (const staleJob of staleJobs.docs) {
+      const recovered = await recoverStaleJob(staleJob.id);
 
-    if (recovered.type === "requeued") {
-      await dispatchQueuedRequest(staleJob.id, recovered.userId, recovered.prompt);
+      if (recovered.type === "requeued") {
+        await dispatchQueuedRequest(
+          staleJob.id,
+          recovered.userId,
+          recovered.prompt,
+        );
+      }
     }
-  }
-});
+  },
+);
 
 export async function queueCreatedRequest(docId: string) {
   const ref = db.collection("generation_requests").doc(docId);
@@ -84,7 +106,7 @@ export async function queueCreatedRequest(docId: string) {
     const snap = await transaction.get(ref);
     const data = snap.data();
 
-    if (!data || data.status !== "CREATED") {
+    if (data?.status !== "CREATED") {
       return false;
     }
 
@@ -99,7 +121,11 @@ export async function queueCreatedRequest(docId: string) {
   });
 }
 
-export async function dispatchQueuedRequest(docId: string, userId: string, prompt: string) {
+export async function dispatchQueuedRequest(
+  docId: string,
+  userId: string,
+  prompt: string,
+) {
   const configResult = await getUserConfig(userId);
 
   if (configResult.type === "temporary_failure") {
@@ -129,8 +155,11 @@ export async function dispatchQueuedRequest(docId: string, userId: string, promp
 async function getUserConfig(userId: string): Promise<ConfigResult> {
   const cached = configCache.get(userId);
 
-  if (cached && cached.expiresAt > Date.now()) {
-    logger.info("config cache hit", { user_id: userId, result: cached.result.type });
+  if (cached?.expiresAt && cached.expiresAt > Date.now()) {
+    logger.info("config cache hit", {
+      user_id: userId,
+      result: cached.result.type,
+    });
     return cached.result;
   }
 
@@ -192,15 +221,18 @@ async function postInference(body: InferenceRequest) {
   const timeout = setTimeout(() => controller.abort(), inferenceTimeoutMs);
 
   try {
-    const response = await fetch(`${requiredEnv("INFERENCE_SERVER_URL")}/generate`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${requiredEnv("API_KEY")}`,
-        "Content-Type": "application/json",
+    const response = await fetch(
+      `${requiredEnv("INFERENCE_SERVER_URL")}/generate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${requiredEnv("API_KEY")}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
       },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
+    );
 
     if (response.ok) {
       return { type: "ok" as const };
@@ -228,7 +260,11 @@ async function postInference(body: InferenceRequest) {
   }
 }
 
-async function markDispatchFailed(docId: string, errorCode: string, message: string) {
+async function markDispatchFailed(
+  docId: string,
+  errorCode: string,
+  message: string,
+) {
   const ref = db.collection("generation_requests").doc(docId);
 
   await db.runTransaction(async (transaction) => {
@@ -273,15 +309,21 @@ export async function recoverStaleJob(docId: string) {
     const snap = await transaction.get(ref);
     const data = snap.data();
 
-    if (!data || data.status !== "PROCESSING" || leaseIsValid(data.lease_expires_at)) {
+    if (data?.status !== "PROCESSING" || leaseIsValid(data.lease_expires_at)) {
       return { type: "ignored" as const };
     }
 
     const attemptCount = Number(data.attempt_count ?? 0);
 
     if (attemptCount >= maxAttempts) {
-      transaction.update(ref, failurePatch("LEASE_EXPIRED", "Processing lease expired"));
-      logger.warn("stale job failed", { doc_id: docId, attempt_count: attemptCount });
+      transaction.update(
+        ref,
+        failurePatch("LEASE_EXPIRED", "Processing lease expired"),
+      );
+      logger.warn("stale job failed", {
+        doc_id: docId,
+        attempt_count: attemptCount,
+      });
       return { type: "failed" as const };
     }
 
@@ -292,7 +334,10 @@ export async function recoverStaleJob(docId: string) {
       updated_at: FieldValue.serverTimestamp(),
     });
 
-    logger.warn("stale job requeued", { doc_id: docId, attempt_count: attemptCount });
+    logger.warn("stale job requeued", {
+      doc_id: docId,
+      attempt_count: attemptCount,
+    });
 
     return {
       type: "requeued" as const,
@@ -310,6 +355,24 @@ function assertValidConfig(config: LoraConfig) {
   assert(config.lora_url.startsWith("https://huggingface.co/"));
   assert(config.lora_weight >= 0);
   assert(config.lora_weight <= 1);
+}
+
+function assertGenerationRequest(
+  data: FirebaseFirestore.DocumentData,
+): asserts data is GenerationRequest {
+  assert(typeof data.user_id === "string");
+  assert(typeof data.prompt === "string");
+  assert(isJobStatus(data.status));
+}
+
+function isJobStatus(status: unknown): status is JobStatus {
+  return (
+    status === "CREATED" ||
+    status === "QUEUED" ||
+    status === "PROCESSING" ||
+    status === "DONE" ||
+    status === "FAILED"
+  );
 }
 
 function requiredEnv(name: string) {
